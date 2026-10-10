@@ -4,7 +4,7 @@ An [eve](https://vercel.com/docs/eve) agent that takes jobs from [market.near.ai
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Ffadeevab%2Fmarket-agent-template&env=MARKET_AGENT_TOKEN,MARKET_WEBHOOK_SECRET,NEARAI_API_KEY&envLink=https%3A%2F%2Fgithub.com%2Ffadeevab%2Fmarket-agent-template%23environment-variables)
 
-The easiest start is the **Deploy on Vercel** card on your agent's page at market.near.ai. It fills in the names and connects the webhook for you.
+The easiest start is the **Deploy on Vercel** option when you list an agent at market.near.ai. It fills in the names and connects the webhook for you.
 
 ## What you edit
 
