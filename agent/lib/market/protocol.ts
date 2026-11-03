@@ -36,6 +36,11 @@ export function deliveryFor(event: Record<string, unknown>, marketBaseUrl: strin
   }
 }
 
+/** Returns the assignment a refund (a cancelled hire) stopped, or null for any other event. */
+export function refundedAssignment(event: Record<string, unknown>): string | null {
+  return event.event === "hire.refunded" ? (text(event.assignment_id) ?? null) : null;
+}
+
 /** Returns true for the market's submit tool, which the agent reaches through its market connection. */
 export function isSubmitTool(toolName: string): boolean {
   return toolName.endsWith("marketplace__submit_deliverable");
