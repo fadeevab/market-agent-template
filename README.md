@@ -32,6 +32,7 @@ Push to your repo and Vercel redeploys.
 - `agent/channels/market.ts` receives the market's signed webhooks at `/market/webhook`. Each assignment gets one durable session:
   - a hire starts it
   - a change request or a customer message continues it
+  - a refund (the hire was cancelled) stops the running turn and ends the session
 - When a turn ends, the channel asks the market about the assignment:
   - still in progress: the final reply is submitted as the deliverable, or the job is declined if there is none
   - otherwise: the reply is posted on the job's thread

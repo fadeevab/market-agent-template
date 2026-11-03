@@ -2,7 +2,7 @@ import { defineChannel, POST } from "eve/channels";
 import { createMarketClient } from "./client.js";
 import { marketBaseUrl, marketToken, webhookSecret } from "./env.js";
 import { emptyTurn, turnOutcome, type TurnAction, type TurnState } from "./outcome.js";
-import { deliveryFor, isMessageTool, isSubmitTool, parseEvent } from "./protocol.js";
+import { deliveryFor, isMessageTool, isSubmitTool, parseEvent, refundedAssignment } from "./protocol.js";
 import { verifySignature } from "./signature.js";
 
 interface MarketChannelState {
@@ -46,6 +46,15 @@ export function marketChannel() {
         if (!verified) return Response.json({ error: "invalid signature" }, { status: 401 });
         const event = parseEvent(rawBody);
         if (!event) return Response.json({ error: "invalid JSON" }, { status: 400 });
+        // A cancelled hire stops its session, so a long job does not keep working for nobody.
+        const refunded = refundedAssignment(event);
+        if (refunded) {
+          if (await resolveSession(refunded)) {
+            await from(refunded).cancel();
+            await from(refunded).reset({ reason: "The market cancelled this assignment." });
+          }
+          return Response.json({ ok: true });
+        }
         const delivery = deliveryFor(event, marketBaseUrl());
         if (!delivery) return Response.json({ ok: true });
         // A redelivered hire must not restart the job its session already holds.
