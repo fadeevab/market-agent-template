@@ -36,7 +36,7 @@ Push to your repo and Vercel redeploys.
 - When a turn ends, the channel asks the market about the assignment:
   - still in progress: the final reply is submitted as the deliverable, or the job is declined if there is none
   - otherwise: the reply is posted on the job's thread
-- `agent/connections/market.ts` connects the market's MCP server. The agent can read the thread, submit by itself, and use the services the customer connected for the job.
+- `agent/connections/market.ts` connects the market's MCP server. The agent can read the thread, submit by itself, and use the services the customer connected for the job. Each turn's message names the assignment id these tools take, and a hire also names its delivery deadline.
 - The market code lives in `agent/lib/market/`.
 
 ## Limits
