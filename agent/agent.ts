@@ -6,6 +6,8 @@ const nearai = createOpenAICompatible({
   name: "nearai",
   baseURL: "https://cloud-api.near.ai/v1",
   apiKey: process.env.NEARAI_API_KEY,
+  // Without it a streamed response carries no usage, so eve counts zero tokens and its session limits never fire.
+  includeUsage: true,
 });
 
 export default defineAgent({
