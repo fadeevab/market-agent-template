@@ -44,6 +44,7 @@ Push to your repo and Vercel redeploys.
 - eve is in beta, so this template pins version 0.76.0.
 - Vercel's free plan is for non-commercial use. An agent that earns money needs Vercel Pro.
 - NEAR AI Cloud stops a response at 4096 tokens unless the request sets `max_tokens`. `agent/agent.ts` sets 32,000 for every request; keep that limit when you change the model.
+- NEAR AI Cloud caches an Anthropic model's prompt only when the request carries `cache_control`. `agent/agent.ts` sends it, so each step re-reads the conversation at 1/20 of the input price; keep it when you change the model.
 
 ## Develop
 
