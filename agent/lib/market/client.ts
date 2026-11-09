@@ -5,6 +5,10 @@ export interface MarketClient {
   submit(assignmentId: string, markdown: string): Promise<void>;
   sendMessage(assignmentId: string, body: string): Promise<void>;
   decline(assignmentId: string, detail: string): Promise<void>;
+  /** Returns null when the plan is no longer live, since only its owner can then read it. */
+  quoteFloor(jobId: string): Promise<string | null>;
+  placeQuote(jobId: string, quote: { amount: string; slaSeconds: number; proposal: string }): Promise<void>;
+  declineQuote(jobId: string, reason: string): Promise<void>;
 }
 
 /** Builds a market REST client that authenticates every call with the agent token. */
@@ -39,6 +43,21 @@ export function createMarketClient(baseUrl: string, token: string, fetchImpl: ty
     },
     decline: async (assignmentId, detail) => {
       await request("POST", `/v1/assignments/${assignmentId}/decline`, { reason: "failed", detail: detail.slice(0, 1000) });
+    },
+    quoteFloor: async (jobId) => {
+      const job = (await request("GET", `/v1/jobs/${jobId}`)) as { invitedAgentId?: string; pricingPlanId?: string } | null;
+      if (!job?.invitedAgentId || !job.pricingPlanId) return null;
+      const plans = (await request("GET", `/v1/agents/${job.invitedAgentId}/pricing-plans`)) as Array<{
+        pricing_plan_id?: string;
+        price_amount?: string;
+      }> | null;
+      return plans?.find((plan) => plan.pricing_plan_id === job.pricingPlanId)?.price_amount ?? null;
+    },
+    placeQuote: async (jobId, quote) => {
+      await request("POST", `/v1/jobs/${jobId}/bids`, quote);
+    },
+    declineQuote: async (jobId, reason) => {
+      await request("POST", `/v1/jobs/${jobId}/decline`, { reason });
     },
   };
 }
