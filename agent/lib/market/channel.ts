@@ -1,12 +1,26 @@
 import { defineChannel, POST } from "eve/channels";
-import { createMarketClient } from "./client.js";
+import { createMarketClient, isRefusal } from "./client.js";
 import { marketBaseUrl, marketToken, webhookSecret } from "./env.js";
 import { emptyTurn, turnOutcome, type TurnAction, type TurnState } from "./outcome.js";
-import { deliveryFor, isMessageTool, isSubmitTool, parseEvent, refundedAssignment } from "./protocol.js";
+import {
+  answersQuote,
+  deliveryFor,
+  isMessageTool,
+  isSubmitTool,
+  parseEvent,
+  quoteContent,
+  quoteJobId,
+  quoteSessionId,
+  refundedAssignment,
+} from "./protocol.js";
+import { quoteAction, UNPRICED_REASON, type QuoteAction } from "./quote.js";
 import { verifySignature } from "./signature.js";
 
 interface MarketChannelState {
   assignmentId: string;
+  /** Set on a quote request's session, which has no assignment. */
+  quoteJobId: string;
+  quoteFloor: string | null;
   turn: TurnState;
 }
 
@@ -18,7 +32,7 @@ export function marketChannel() {
   return defineChannel<MarketChannelState, { state: MarketChannelState }>({
     // A customer message waits for the running job turn instead of steering it.
     turnPolicy: "queue",
-    state: { assignmentId: "", turn: emptyTurn() },
+    state: { assignmentId: "", quoteJobId: "", quoteFloor: null, turn: emptyTurn() },
     context: (state) => ({ state }),
     fetchFile: async (url) => {
       if (!url.startsWith(`${marketBaseUrl()}/`)) return null;
@@ -55,6 +69,18 @@ export function marketChannel() {
           }
           return Response.json({ ok: true });
         }
+        const jobId = quoteJobId(event);
+        if (jobId) {
+          const sessionId = quoteSessionId(jobId);
+          // A redelivered request must not price the task twice.
+          if (await resolveSession(sessionId)) return Response.json({ ok: true });
+          const floor = await quoteFloor(jobId);
+          await from(sessionId).send(quoteContent(event, floor, marketBaseUrl()), {
+            auth: MARKET_AUTH,
+            state: { assignmentId: "", quoteJobId: jobId, quoteFloor: floor, turn: emptyTurn() },
+          });
+          return Response.json({ ok: true });
+        }
         const delivery = deliveryFor(event, marketBaseUrl());
         if (!delivery) return Response.json({ ok: true });
         // A redelivered hire must not restart the job its session already holds.
@@ -63,7 +89,7 @@ export function marketChannel() {
         }
         await from(delivery.assignmentId).send(delivery.content, {
           auth: MARKET_AUTH,
-          state: { assignmentId: delivery.assignmentId, turn: emptyTurn() },
+          state: { assignmentId: delivery.assignmentId, quoteJobId: "", quoteFloor: null, turn: emptyTurn() },
         });
         return Response.json({ ok: true });
       }),
@@ -72,7 +98,11 @@ export function marketChannel() {
       "action.result"(data, channel) {
         const result = data.result;
         if (result.kind !== "tool-result" || data.status !== "completed" || result.isError) return;
-        if (isSubmitTool(result.toolName)) channel.state.turn = { ...channel.state.turn, submitted: true };
+        // A bid on another job answers neither a hire nor this quote request.
+        const answered = channel.state.quoteJobId
+          ? answersQuote(result.toolName, result.output, channel.state.quoteJobId)
+          : isSubmitTool(result.toolName);
+        if (answered) channel.state.turn = { ...channel.state.turn, submitted: true };
         if (isMessageTool(result.toolName)) channel.state.turn = { ...channel.state.turn, messaged: true };
       },
       "message.completed"(data, channel) {
@@ -91,6 +121,10 @@ export function marketChannel() {
 async function settle(state: MarketChannelState, failed: boolean): Promise<void> {
   const turn = state.turn;
   state.turn = emptyTurn();
+  if (state.quoteJobId) {
+    await answerQuote(state.quoteJobId, quoteAction(turn, { failed, floor: state.quoteFloor }));
+    return;
+  }
   const client = createMarketClient(marketBaseUrl(), marketToken());
   let action: TurnAction;
   try {
@@ -106,6 +140,31 @@ async function settle(state: MarketChannelState, failed: boolean): Promise<void>
     if (action.type === "decline") await client.decline(state.assignmentId, FAILED_DETAIL);
   } catch (err) {
     console.error(`market ${action.type} for ${state.assignmentId} failed: ${errorText(err)}`);
+  }
+}
+
+async function answerQuote(jobId: string, action: QuoteAction): Promise<void> {
+  if (action.type === "none") return;
+  const client = createMarketClient(marketBaseUrl(), marketToken());
+  try {
+    if (action.type === "quote") {
+      await client.placeQuote(jobId, { amount: action.amount, slaSeconds: action.slaSeconds, proposal: action.proposal });
+    }
+    if (action.type === "decline") await client.declineQuote(jobId, action.reason);
+  } catch (err) {
+    console.error(`market ${action.type} for quote request ${jobId} failed: ${errorText(err)}`);
+    // The market refuses this decline while a quote is pending, so it cannot remove a quote.
+    if (action.type === "quote" && isRefusal(err)) await answerQuote(jobId, { type: "decline", reason: UNPRICED_REASON });
+  }
+}
+
+/** Returns null when the lookup fails, so the agent still answers and the market enforces the floor. */
+async function quoteFloor(jobId: string): Promise<string | null> {
+  try {
+    return await createMarketClient(marketBaseUrl(), marketToken()).quoteFloor(jobId);
+  } catch (err) {
+    console.error(`market from price for quote request ${jobId} failed: ${errorText(err)}`);
+    return null;
   }
 }
 
