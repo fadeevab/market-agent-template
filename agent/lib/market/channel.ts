@@ -1,18 +1,19 @@
 import { defineChannel, POST } from "eve/channels";
-import { createMarketClient } from "./client.js";
+import { createMarketClient, isRefusal } from "./client.js";
 import { marketBaseUrl, marketToken, webhookSecret } from "./env.js";
 import { emptyTurn, turnOutcome, type TurnAction, type TurnState } from "./outcome.js";
 import {
+  answersQuote,
   deliveryFor,
   isMessageTool,
-  isQuoteAnswerTool,
   isSubmitTool,
   parseEvent,
+  quoteContent,
   quoteJobId,
-  quoteRequestFor,
+  quoteSessionId,
   refundedAssignment,
 } from "./protocol.js";
-import { quoteAction, type QuoteAction } from "./quote.js";
+import { quoteAction, UNPRICED_REASON, type QuoteAction } from "./quote.js";
 import { verifySignature } from "./signature.js";
 
 interface MarketChannelState {
@@ -70,13 +71,13 @@ export function marketChannel() {
         }
         const jobId = quoteJobId(event);
         if (jobId) {
-          const floor = await quoteFloor(jobId);
-          const quote = quoteRequestFor(event, floor, marketBaseUrl());
+          const sessionId = quoteSessionId(jobId);
           // A redelivered request must not price the task twice.
-          if (!quote || (await resolveSession(quote.sessionId))) return Response.json({ ok: true });
-          await from(quote.sessionId).send(quote.content, {
+          if (await resolveSession(sessionId)) return Response.json({ ok: true });
+          const floor = await quoteFloor(jobId);
+          await from(sessionId).send(quoteContent(event, floor, marketBaseUrl()), {
             auth: MARKET_AUTH,
-            state: { assignmentId: "", quoteJobId: quote.jobId, quoteFloor: floor, turn: emptyTurn() },
+            state: { assignmentId: "", quoteJobId: jobId, quoteFloor: floor, turn: emptyTurn() },
           });
           return Response.json({ ok: true });
         }
@@ -97,9 +98,11 @@ export function marketChannel() {
       "action.result"(data, channel) {
         const result = data.result;
         if (result.kind !== "tool-result" || data.status !== "completed" || result.isError) return;
-        if (isSubmitTool(result.toolName) || isQuoteAnswerTool(result.toolName)) {
-          channel.state.turn = { ...channel.state.turn, submitted: true };
-        }
+        // A bid on another job answers neither a hire nor this quote request.
+        const answered = channel.state.quoteJobId
+          ? answersQuote(result.toolName, result.output, channel.state.quoteJobId)
+          : isSubmitTool(result.toolName);
+        if (answered) channel.state.turn = { ...channel.state.turn, submitted: true };
         if (isMessageTool(result.toolName)) channel.state.turn = { ...channel.state.turn, messaged: true };
       },
       "message.completed"(data, channel) {
@@ -150,6 +153,8 @@ async function answerQuote(jobId: string, action: QuoteAction): Promise<void> {
     if (action.type === "decline") await client.declineQuote(jobId, action.reason);
   } catch (err) {
     console.error(`market ${action.type} for quote request ${jobId} failed: ${errorText(err)}`);
+    // The market refuses this decline while a quote is pending, so it cannot remove a quote.
+    if (action.type === "quote" && isRefusal(err)) await answerQuote(jobId, { type: "decline", reason: UNPRICED_REASON });
   }
 }
 

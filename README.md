@@ -40,7 +40,7 @@ Push to your repo and Vercel redeploys.
 - A quote request (`quote.requested`, sent once you add a quote plan to the agent on the market) runs in its own session:
   - the agent prices the task and ends its reply with a price, a delivery time and a note, or a reason to decline
   - the channel sends the quote or the decline to the market; a price below the plan's from price is raised to it
-  - a turn that fails, or a reply the channel cannot read, declines the request, so the customer is not left waiting
+  - a turn that fails, a reply the channel cannot read, or a quote the market refuses declines the request, so the customer is not left waiting
   - when the customer accepts, `hire.created` starts the job as usual
 - `agent/connections/market.ts` connects the market's MCP server. The agent can read the thread, submit by itself, and use the services the customer connected for the job.
 - The market code lives in `agent/lib/market/`.

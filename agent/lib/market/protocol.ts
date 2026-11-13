@@ -11,13 +11,6 @@ export interface MarketDelivery {
   content: Array<TextPart | FilePart>;
 }
 
-export interface QuoteRequest {
-  jobId: string;
-  /** Kept apart from the assignment session a later hire starts. */
-  sessionId: string;
-  content: Array<TextPart | FilePart>;
-}
-
 /** Parses a webhook body into an event object, or returns null when it is not a JSON object. */
 export function parseEvent(rawBody: Uint8Array): Record<string, unknown> | null {
   try {
@@ -49,19 +42,18 @@ export function quoteJobId(event: Record<string, unknown>): string | null {
   return event.event === "quote.requested" ? (text(event.job_id) ?? null) : null;
 }
 
-/** Returns the quote request a `quote.requested` event asks the agent to price, or null for any other event. */
-export function quoteRequestFor(
+/** Returns the session of a quote request, kept apart from the assignment session a later hire starts. */
+export function quoteSessionId(jobId: string): string {
+  return `quote-${jobId}`;
+}
+
+/** Builds the session message that asks the agent to price a `quote.requested` event. */
+export function quoteContent(
   event: Record<string, unknown>,
   floor: string | null,
   marketBaseUrl: string,
-): QuoteRequest | null {
-  const jobId = quoteJobId(event);
-  if (!jobId) return null;
-  return {
-    jobId,
-    sessionId: `quote-${jobId}`,
-    content: withFiles(quoteText(event, floor), event.attachments, marketBaseUrl),
-  };
+): Array<TextPart | FilePart> {
+  return withFiles(quoteText(event, floor), event.attachments, marketBaseUrl);
 }
 
 /** Returns the assignment a refund (a cancelled hire) stopped, or null for any other event. */
@@ -79,9 +71,10 @@ export function isMessageTool(toolName: string): boolean {
   return toolName.endsWith("marketplace__send_message");
 }
 
-/** Returns true for the market's tools that answer a quote request. */
-export function isQuoteAnswerTool(toolName: string): boolean {
-  return toolName.endsWith("marketplace__place_bid") || toolName.endsWith("marketplace__decline_quote");
+/** Returns true when a tool result is the bid or the job of this quote request. */
+export function answersQuote(toolName: string, output: unknown, jobId: string): boolean {
+  if (!toolName.endsWith("marketplace__place_bid") && !toolName.endsWith("marketplace__decline_quote")) return false;
+  return output !== null && typeof output === "object" && (output as Record<string, unknown>).jobId === jobId;
 }
 
 function quoteText(event: Record<string, unknown>, floor: string | null): string {
@@ -96,6 +89,7 @@ function quoteText(event: Record<string, unknown>, floor: string | null): string
     floor
       ? `Your lowest price is ${floor} ${token}. A lower price is raised to it.`
       : "Quote at or above your quote plan's from price.",
+    "If you have a `price_a_quote` skill, load it before you price. Use the rates in it.",
     [
       "Do not do the task now. Price it, then end your reply with one JSON object in a ```json block:",
       '{"decision": "quote", "price": "35.00", "delivery_minutes": 240, "note": "What the price covers, in one or two sentences."}',

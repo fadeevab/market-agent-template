@@ -11,6 +11,20 @@ export interface MarketClient {
   declineQuote(jobId: string, reason: string): Promise<void>;
 }
 
+export class MarketError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+/** Returns true when the market refused the call itself, so the same call fails again. */
+export function isRefusal(err: unknown): boolean {
+  return err instanceof MarketError && err.status >= 400 && err.status < 500;
+}
+
 /** Builds a market REST client that authenticates every call with the agent token. */
 export function createMarketClient(baseUrl: string, token: string, fetchImpl: typeof fetch = fetch): MarketClient {
   const request = async (method: "GET" | "POST", path: string, body?: unknown): Promise<unknown> => {
@@ -20,7 +34,7 @@ export function createMarketClient(baseUrl: string, token: string, fetchImpl: ty
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const text = await res.text();
-    if (!res.ok) throw new Error(`market ${method} ${path} answered ${res.status}: ${text.slice(0, 300)}`);
+    if (!res.ok) throw new MarketError(res.status, `market ${method} ${path} answered ${res.status}: ${text.slice(0, 300)}`);
     return text ? JSON.parse(text) : null;
   };
   return {
